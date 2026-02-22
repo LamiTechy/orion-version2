@@ -109,27 +109,47 @@ async function extractPdfText(buffer) {
 app.post('/api/upload', authenticateToken, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
+
     const file = req.file;
-    const mime = file.mimetype;
+    const mime = file.mimetype || '';
+    const fileName = file.originalname || '';
+
     let extractedText = '';
     let isImage = false;
     let imageData = null;
 
-    if (mime === 'application/pdf') {
-      try { extractedText = await extractPdfText(file.buffer); }
-      catch (e) { return res.status(500).json({ error: 'Failed to parse PDF: ' + e.message }); }
-    } else if (mime.startsWith('text/') || mime === 'application/json' || mime === 'application/xml') {
+    // ✅ FIXED PDF DETECTION (WORKS ON MOBILE + DESKTOP)
+    const isPdf =
+      mime.includes('pdf') ||
+      fileName.toLowerCase().endsWith('.pdf');
+
+    if (isPdf) {
+      try {
+        extractedText = await extractPdfText(file.buffer);
+      } catch (e) {
+        return res.status(500).json({ error: 'Failed to parse PDF: ' + e.message });
+      }
+
+    } else if (
+      mime.startsWith('text/') ||
+      mime === 'application/json' ||
+      mime === 'application/xml'
+    ) {
+
       extractedText = file.buffer.toString('utf-8');
+
     } else if (mime.startsWith('image/')) {
+
       isImage = true;
       imageData = file.buffer.toString('base64');
       extractedText = `[Image file: ${file.originalname}]`;
+
     } else {
-      // Try to read as text for unknown types (code files, csv, etc)
+
       try {
         extractedText = file.buffer.toString('utf-8');
       } catch {
-        extractedText = `[Binary file: ${file.originalname} - ${(file.size/1024).toFixed(1)}KB]`;
+        extractedText = `[Binary file: ${file.originalname} - ${(file.size / 1024).toFixed(1)}KB]`;
       }
     }
 
@@ -142,6 +162,7 @@ app.post('/api/upload', authenticateToken, upload.single('file'), async (req, re
       imageData,
       content: extractedText.substring(0, 50000)
     });
+
   } catch (err) {
     console.error('Upload error:', err);
     res.status(500).json({ error: 'Failed to process file: ' + err.message });
