@@ -1,0 +1,20 @@
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: 'Space Grotesk', sans-serif; background: radial-gradient(ellipse at bottom, #0a0e27 0%, #050816 100%); color: #e0e7ff; min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 40px; }
+.auth-container { background: rgba(26, 31, 58, 0.7); border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 20px; padding: 48px; max-width: 440px; width: 100%; backdrop-filter: blur(20px); box-shadow: 0 20px 80px rgba(99, 102, 241, 0.2); }
+h1 { font-family: 'Orbitron', sans-serif; font-size: 2.5rem; font-weight: 900; margin-bottom: 12px; background: linear-gradient(135deg, #818cf8, #06b6d4); -webkit-background-clip: text; -webkit-text-fill-color: transparent; text-align: center; }
+p { text-align: center; color: rgba(224, 231, 255, 0.6); margin-bottom: 32px; }
+.form-group { margin-bottom: 24px; }
+label { display: block; margin-bottom: 8px; font-weight: 500; font-size: 0.9rem; color: rgba(224, 231, 255, 0.8); }
+input { width: 100%; padding: 14px 16px; border: 1px solid rgba(99, 102, 241, 0.3); border-radius: 8px; background: rgba(10, 14, 39, 0.5); color: #e0e7ff; font-family: 'Space Grotesk', sans-serif; font-size: 1rem; transition: all 0.3s; }
+input:focus { outline: none; border-color: #6366f1; box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1); }
+.submit-btn { width: 100%; padding: 16px; background: linear-gradient(135deg, #6366f1, #06b6d4); border: none; border-radius: 10px; color: white; font-family: 'Orbitron', sans-serif; font-weight: 700; font-size: 1rem; letter-spacing: 1px; cursor: pointer; transition: all 0.3s; margin-top: 8px; }
+.submit-btn:hover { transform: translateY(-2px); box-shadow: 0 10px 30px rgba(99, 102, 241, 0.4); }
+.submit-btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+.error { background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); color: #fca5a5; padding: 12px; border-radius: 8px; margin-bottom: 20px; font-size: 0.9rem; display: none; }
+.divider { text-align: center; color: rgba(224, 231, 255, 0.4); margin: 28px 0; font-size: 0.85rem; }
+.alt-link { text-align: center; color: rgba(224, 231, 255, 0.6); font-size: 0.9rem; }
+.alt-link a { color: #818cf8; text-decoration: none; font-weight: 600; }
+.alt-link a:hover { color: #06b6d4; }
+.back-link { text-align: center; margin-top: 20px; }
+.back-link a { color: rgba(224, 231, 255, 0.5); text-decoration: none; font-size: 0.85rem; }
+.back-link a:hover { color: rgba(224, 231, 255, 0.8); }

@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Chat — Orion AI</title>
+  <link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700&family=Space+Grotesk:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/chat.css">
+</head>
+<body>
+
+<div class="app">
+  <div class="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <div class="logo-dot"></div>
+        <div class="logo-text">Orion<span>AI</span></div>
+      </div>
+      <div style="display: flex; gap: 8px; align-items: center;">
+        <button class="new-chat-btn" id="newChatBtn">+ New</button>
+        <button class="close-btn" id="closeSidebarBtn" style="background: none; border: none; color: var(--text); font-size: 1.5rem; cursor: pointer; padding: 4px 8px;">✕</button>
+      </div>
+    </div>
+    <div class="conversations-list" id="conversationsList">
+      <div class="empty-sidebar">Start a new conversation</div>
+    </div>
+    <div class="sidebar-footer">
+      <div class="user-info" id="userInfo">
+        <div class="user-avatar">U</div>
+        <div class="user-details">
+          <div class="user-email" id="userEmail">Loading...</div>
+        </div>
+        <button class="logout-btn" id="logoutBtn" title="Sign out">×</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="main">
+    <header>
+      <button class="hamburger-btn" id="hamburgerBtn">☰</button>
+      <div class="chat-title" id="chatTitle">New Chat</div>
+      <div style="display:flex;gap:8px;align-items:center;">
+        <button class="btn-ghost" id="imageGenBtn" title="Generate Image">🖼 IMAGE</button>
+        <button class="btn-ghost" id="clearBtn">CLEAR</button>
+      </div>
+    </header>
+
+    <!-- Image Generation Modal -->
+    <div id="imageModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center;">
+      <div style="background:var(--surface,#1a1a2e);border:1px solid var(--border,#333);border-radius:16px;padding:28px;width:90%;max-width:480px;box-shadow:0 20px 60px rgba(0,0,0,0.5);">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:20px;">
+          <h3 style="margin:0;font-size:1.1rem;">🖼 Generate Image</h3>
+          <button id="closeImageModal" style="background:none;border:none;color:inherit;font-size:1.5rem;cursor:pointer;">×</button>
+        </div>
+        <textarea id="imagePrompt" placeholder="Describe the image you want to generate..." style="width:100%;min-height:90px;background:var(--input-bg,#0d0d1a);border:1px solid var(--border,#333);border-radius:8px;padding:12px;color:inherit;font-family:inherit;font-size:0.95rem;resize:vertical;box-sizing:border-box;margin-bottom:16px;"></textarea>
+        <button id="generateImageBtn" style="width:100%;padding:12px;background:var(--accent,#7c3aed);border:none;border-radius:8px;color:#fff;font-size:0.95rem;cursor:pointer;font-weight:600;">Generate Image</button>
+        <div id="imageResult" style="margin-top:16px;display:none;">
+          <img id="generatedImg" style="width:100%;border-radius:8px;margin-bottom:10px;" alt="Generated" />
+          <button id="downloadImgBtn" style="width:100%;padding:10px;background:transparent;border:1px solid var(--border,#333);border-radius:8px;color:inherit;cursor:pointer;">⬇ Download Image</button>
+        </div>
+        <div id="imageError" style="margin-top:12px;color:#f87171;font-size:0.9rem;display:none;"></div>
+        <div id="imageLoading" style="margin-top:12px;text-align:center;display:none;">⏳ Generating... this may take 20-30 seconds</div>
+      </div>
+    </div>
+
+    <div class="chat-area" id="chatArea">
+      <div class="empty-state" id="emptyState">
+        <h2>Hey, I'm Orion</h2>
+        <p>Your AI assistant</p>
+      </div>
+    </div>
+
+    <div class="input-area">
+      <div class="input-row">
+        <!-- ← ADDED: File upload button -->
+        <button class="file-btn" id="fileBtn" title="Upload file (PDF, image, text)">
+          <svg viewBox="0 0 24 24" width="20" height="20" fill="currentColor">
+            <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2M18,20H6V4H13V9H18V20M12,19L8,15H10.5V12H13.5V15H16L12,19Z"/>
+          </svg>
+        </button>
+        <input type="file" id="fileInput" accept="*" style="display: none;">
+        <!-- ← END ADDED -->
+        
+        <textarea id="messageInput" placeholder="Message Orion..." rows="1"></textarea>
+        <button class="send-btn" id="sendBtn">
+          <svg viewBox="0 0 24 24"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+        </button>
+      </div>
+      
+      <!-- ← ADDED: File preview area -->
+      <div class="file-preview" id="filePreview" style="display: none;">
+        <div class="file-info">
+          <span class="file-icon" id="fileIcon">📄</span>
+          <span class="file-name" id="fileName"></span>
+          <span class="file-size" id="fileSize"></span>
+        </div>
+        <button class="file-remove" id="fileRemove">×</button>
+      </div>
+      <!-- ← END ADDED -->
+      
+      <div class="status" id="status">
+        <span class="status-dot" id="statusDot"></span>
+        <span id="statusText">Ready</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/chat.js" type="module"></script>
+
+<script>
+  // Mobile hamburger menu functionality
+  const hamburgerBtn = document.getElementById('hamburgerBtn');
+  const closeSidebarBtn = document.getElementById('closeSidebarBtn');
+  const sidebar = document.querySelector('.sidebar');
+  const conversationsList = document.getElementById('conversationsList');
+
+  if (hamburgerBtn) {
+    hamburgerBtn.addEventListener('click', () => {
+      sidebar.classList.toggle('active');
+    });
+  }
+
+  if (closeSidebarBtn) {
+    closeSidebarBtn.addEventListener('click', () => {
+      sidebar.classList.remove('active');
+    });
+  }
+
+  if (conversationsList) {
+    conversationsList.addEventListener('click', () => {
+      if (window.innerWidth <= 768) {
+        sidebar.classList.remove('active');
+      }
+    });
+  }
+</script>
+
+</body>
+</html>
