@@ -25,16 +25,13 @@ const app = express();
 const PORT = process.env.PORT || 3000;
 const JWT_SECRET = process.env.JWT_SECRET || 'change-this-secret-key';
 
-// MongoDB
 mongoose.connect(process.env.MONGODB_URI)
   .then(() => console.log('✅ Connected to MongoDB'))
   .catch(err => { console.error('❌ MongoDB error:', err); process.exit(1); });
 
-// Groq
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
 const MODEL = 'llama-3.3-70b-versatile';
 
-// Middleware
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));
 app.use(express.urlencoded({ limit: '25mb', extended: true }));
@@ -43,14 +40,12 @@ app.use(express.static(path.join(__dirname, '../public')));
 const limiter = rateLimit({ windowMs: 60 * 1000, max: 60, message: { error: 'Too many requests.' } });
 app.use('/api/', limiter);
 
-// File Upload - accept ALL types
 const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: 20 * 1024 * 1024 },
   fileFilter: (req, file, cb) => cb(null, true)
 });
 
-// Auth Middleware
 function authenticateToken(req, res, next) {
   const token = req.headers['authorization']?.split(' ')[1];
   if (!token) return res.status(401).json({ error: 'Access denied.' });
@@ -72,12 +67,10 @@ async function generateAITitle(message) {
     const response = await groq.chat.completions.create({
       model: MODEL,
       max_tokens: 20,
-      messages: [
-        {
-          role: 'user',
-          content: `Generate a short 3-6 word title for a conversation that starts with this message. Only return the title, nothing else, no quotes, capitalize the first letter of each word:\n\n"${message.slice(0, 200)}"`
-        }
-      ]
+      messages: [{
+        role: 'user',
+        content: `Generate a short 3-6 word title for a conversation that starts with this message. Only return the title, nothing else, no quotes, capitalize the first letter of each word:\n\n"${message.slice(0, 200)}"`
+      }]
     });
     const title = response.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
     return title || generateTitle(message);
@@ -86,15 +79,11 @@ async function generateAITitle(message) {
   }
 }
 
-// Web Search
 async function searchWeb(query) {
   try {
     const response = await axios.post('https://api.tavily.com/search', {
       api_key: process.env.TAVILY_API_KEY,
-      query,
-      search_depth: 'basic',
-      include_answer: true,
-      max_results: 5
+      query, search_depth: 'basic', include_answer: true, max_results: 5
     });
     return { answer: response.data.answer || '', results: response.data.results || [] };
   } catch (err) {
@@ -109,23 +98,19 @@ function needsRealTimeInfo(message) {
   return keywords.some(k => message.toLowerCase().includes(k));
 }
 
-// File Text Extraction - supports all file types
 async function extractFileContent(buffer, mimetype, filename) {
   const ext = filename.split('.').pop().toLowerCase();
 
-  // PDF - uses pdf-parse (server-side only, no worker, works on all platforms including mobile)
   if (mimetype === 'application/pdf' || ext === 'pdf') {
     try {
       const pdfParse = (await import('pdf-parse/lib/pdf-parse.js')).default;
       const data = await pdfParse(buffer);
       return { text: data.text, type: 'document' };
     } catch (err) {
-      console.error('PDF parse error:', err.message);
       throw new Error('Failed to parse PDF: ' + err.message);
     }
   }
 
-  // Word documents
   if (ext === 'docx' || mimetype === 'application/vnd.openxmlformats-officedocument.wordprocessingml.document') {
     try {
       const mammoth = (await import('mammoth')).default;
@@ -136,7 +121,6 @@ async function extractFileContent(buffer, mimetype, filename) {
     }
   }
 
-  // Excel spreadsheets
   if (ext === 'xlsx' || ext === 'xls') {
     try {
       const XLSX = (await import('xlsx')).default;
@@ -152,63 +136,54 @@ async function extractFileContent(buffer, mimetype, filename) {
     }
   }
 
-  // CSV
   if (ext === 'csv') {
     return { text: buffer.toString('utf-8'), type: 'document' };
   }
 
-  // Images
-  // if (mimetype.startsWith('image/')) {
-  //   return {
-  //     text: `[Image: ${filename}]`,
-  //     type: 'image',
-  //     imageData: buffer.toString('base64'),
-  //     imageExt: ext
-  //   };
-  // }
+  if (mimetype.startsWith('image/')) {
+    const base64 = buffer.toString('base64');
+    const fs = (await import('fs')).default;
+    const uploadsDir = path.join(__dirname, '..', 'public', 'uploads');
+    if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+    const uniqueName = `${Date.now()}-${filename.replace(/[^a-zA-Z0-9.]/g, '_')}`;
+    fs.writeFileSync(path.join(uploadsDir, uniqueName), buffer);
+    const imageUrl = `/uploads/${uniqueName}`;
 
-  // Images - use Groq vision to describe the image
-if (mimetype.startsWith('image/')) {
-  const base64 = buffer.toString('base64');
-  let description = '';
-  try {
-    const visionResponse = await groq.chat.completions.create({
-      model: 'meta-llama/llama-4-scout-17b-16e-instruct',
-      messages: [
-        {
+    let description = '';
+    try {
+      const visionResponse = await groq.chat.completions.create({
+        model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+        messages: [{
           role: 'user',
           content: [
             { type: 'image_url', image_url: { url: `data:${mimetype};base64,${base64}` } },
             { type: 'text', text: 'Describe this image in detail. Include all visible text, objects, people, colors, layout, and any other relevant information.' }
           ]
-        }
-      ],
-      max_tokens: 1024
-    });
-    description = visionResponse.choices[0].message.content;
-    console.log('Image described by vision model');
-  } catch (err) {
-    console.error('Vision error:', err.message);
-    description = `[Image file: ${filename}]`;
-  }
-  return {
-    text: `[Image: ${filename}]\n\nImage description:\n${description}`,
-    type: 'image',
-    imageData: base64,
-    imageExt: ext
-  };
-}
+        }],
+        max_tokens: 1024
+      });
+      description = visionResponse.choices[0].message.content;
+      console.log('Image described by vision model');
+    } catch (err) {
+      console.error('Vision error:', err.message);
+      description = `[Image file: ${filename}]`;
+    }
 
-  // Text-readable files: code, config, markup, data files
-  const textTypes = [
-    'js', 'ts', 'jsx', 'tsx', 'py', 'java', 'c', 'cpp', 'cs', 'go', 'rs',
-    'php', 'rb', 'swift', 'kt', 'md', 'txt', 'html', 'css', 'sql', 'sh',
-    'json', 'xml', 'yaml', 'yml', 'env', 'toml', 'ini', 'log', 'vue', 'svelte',
-    'r', 'dart', 'lua', 'perl', 'scala', 'clj', 'ex', 'erl', 'hs', 'elm'
-  ];
+    return {
+      text: `[Image: ${filename}]\n\nImage description:\n${description}`,
+      type: 'image',
+      imageUrl,
+      imageData: base64,
+      imageExt: ext
+    };
+  }
+
+  const textTypes = ['js','ts','jsx','tsx','py','java','c','cpp','cs','go','rs','php','rb',
+    'swift','kt','md','txt','html','css','sql','sh','json','xml','yaml','yml','env','toml',
+    'ini','log','vue','svelte','r','dart','lua','perl','scala','clj','ex','erl','hs','elm'];
 
   if (mimetype.startsWith('text/') || mimetype === 'application/json' ||
-      mimetype === 'application/xml' || textTypes.includes(ext)) {
+    mimetype === 'application/xml' || textTypes.includes(ext)) {
     try {
       return { text: buffer.toString('utf-8'), type: 'document' };
     } catch {
@@ -216,14 +191,12 @@ if (mimetype.startsWith('image/')) {
     }
   }
 
-  // Unknown binary files
   return {
-    text: `[File: ${filename} | Type: ${mimetype} | Size: ${(buffer.length / 1024).toFixed(1)}KB]\nThis file type cannot be read as text but has been received.`,
+    text: `[File: ${filename} | Type: ${mimetype} | Size: ${(buffer.length / 1024).toFixed(1)}KB]\nThis file type cannot be read as text.`,
     type: 'document'
   };
 }
 
-// Upload Route
 app.post('/api/upload', authenticateToken, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
@@ -235,6 +208,7 @@ app.post('/api/upload', authenticateToken, upload.single('file'), async (req, re
       fileType: file.mimetype,
       fileSize: file.size,
       isImage: extracted.type === 'image',
+      imageUrl: extracted.imageUrl || null,
       imageData: extracted.imageData || null,
       imageExt: extracted.imageExt || null,
       content: extracted.text.substring(0, 50000)
@@ -245,15 +219,13 @@ app.post('/api/upload', authenticateToken, upload.single('file'), async (req, re
   }
 });
 
-// Image Generation
+app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
+
 app.post('/api/generate-image', authenticateToken, async (req, res) => {
   const { prompt } = req.body;
   if (!prompt) return res.status(400).json({ error: 'No prompt provided' });
-
   const HF_API_KEY = process.env.HF_API_KEY || '';
-  if (!HF_API_KEY) {
-    return res.status(401).json({ error: 'HF_API_KEY not set. Get a free key at https://huggingface.co/settings/tokens' });
-  }
+  if (!HF_API_KEY) return res.status(401).json({ error: 'HF_API_KEY not set.' });
 
   const models = [
     'black-forest-labs/FLUX.1-schnell',
@@ -287,11 +259,9 @@ app.post('/api/generate-image', authenticateToken, async (req, res) => {
       console.error(`${model} failed:`, err.message);
     }
   }
-
   res.status(500).json({ error: 'Image generation failed. Please try again.' });
 });
 
-// Auth Routes
 app.post('/api/auth/signup', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Email and password required.' });
@@ -332,9 +302,8 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
   }
 });
 
-// Chat Stream
 app.post('/api/chat/stream', authenticateToken, async (req, res) => {
-  const { message, conversationId, fileContent, fileName, isImage } = req.body;
+  const { message, conversationId, fileContent, fileName, isImage, imageUrl } = req.body;
   if (!message || typeof message !== 'string') return res.status(400).json({ error: 'Message is required.' });
 
   try {
@@ -352,6 +321,9 @@ app.post('/api/chat/stream', authenticateToken, async (req, res) => {
     let userMessageForDB = message;
     if (fileContent && !isImage) {
       userMessageForDB = `[File: ${fileName}]\n${fileContent.substring(0, 500)}...\n\n---\n\n${message}`;
+    } else if (isImage && fileContent) {
+      const imgTag = imageUrl ? `\n![image](${imageUrl})` : '';
+      userMessageForDB = `[Image: ${fileName}]${imgTag}\n${fileContent.substring(0, 300)}...\n\n---\n\n${message}`;
     }
 
     await Message.create({ conversationId: conversation._id, role: 'user', content: userMessageForDB });
@@ -369,8 +341,8 @@ app.post('/api/chat/stream', authenticateToken, async (req, res) => {
     let messageContent = message;
     if (fileContent && !isImage) {
       messageContent = `The user uploaded a file named "${fileName}".\n\nFull file content:\n${fileContent}\n\n---\n\nUser question: ${message}`;
-    } else if (isImage) {
-      messageContent = `The user uploaded an image named "${fileName}".\n\n${fileContent}\n\n---\n\nUser question: ${message}`
+    } else if (isImage && fileContent) {
+      messageContent = `The user uploaded an image named "${fileName}".\n\nHere is what the image contains (analyzed by a vision model):\n${fileContent}\n\n---\n\nUser question: ${message}`;
     }
 
     let searchContext = '';
@@ -389,7 +361,7 @@ app.post('/api/chat/stream', authenticateToken, async (req, res) => {
     const messagesForAI = [
       {
         role: 'system',
-        content: (process.env.SYSTEM_PROMPT || 'You are Orion, a helpful AI assistant. When a user uploads a file, carefully read and analyze the full content provided and answer questions about it accurately.') + searchContext
+        content: (process.env.SYSTEM_PROMPT || 'You are Orion, a helpful AI assistant. When a user uploads a file or image, carefully read and analyze the full content provided and answer questions about it accurately.') + searchContext
       },
       ...history.slice(-6),
       { role: 'user', content: messageContent }
@@ -419,7 +391,6 @@ app.post('/api/chat/stream', authenticateToken, async (req, res) => {
   }
 });
 
-// Conversation Routes
 app.get('/api/conversations', authenticateToken, async (req, res) => {
   try {
     const convs = await Conversation.find({ userId: req.userId }).sort({ createdAt: -1 });
@@ -455,12 +426,12 @@ app.delete('/api/conversations/:id', authenticateToken, async (req, res) => {
   } catch { res.status(500).json({ error: 'Failed to delete.' }); }
 });
 
-// Serve Frontend
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));
 
 app.listen(PORT, () => {
   console.log(`\n🚀 Orion AI running at http://localhost:${PORT}`);
   console.log(`🤖 Model: ${MODEL}`);
   console.log(`📁 File support: PDF, DOCX, XLSX, CSV, images, all code files`);
-  console.log(`🖼  Image generation: Hugging Face FLUX\n`);
+  console.log(`👁  Vision: Llama 4 Scout`);
+  console.log(`🖼  Image gen: Hugging Face FLUX\n`);
 });

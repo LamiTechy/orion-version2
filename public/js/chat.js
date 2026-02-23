@@ -4,7 +4,6 @@ if (!token) window.location.href = '/login.html';
 const user = JSON.parse(localStorage.getItem('user') || '{}');
 
 const chatArea = document.getElementById('chatArea');
-const emptyState = document.getElementById('emptyState');
 const messageInput = document.getElementById('messageInput');
 const sendBtn = document.getElementById('sendBtn');
 const newChatBtn = document.getElementById('newChatBtn');
@@ -15,7 +14,6 @@ const chatTitle = document.getElementById('chatTitle');
 const conversationsList = document.getElementById('conversationsList');
 const userEmail = document.getElementById('userEmail');
 const logoutBtn = document.getElementById('logoutBtn');
-
 const fileBtn = document.getElementById('fileBtn');
 const fileInput = document.getElementById('fileInput');
 const filePreview = document.getElementById('filePreview');
@@ -23,7 +21,6 @@ const fileName = document.getElementById('fileName');
 const fileSize = document.getElementById('fileSize');
 const fileIcon = document.getElementById('fileIcon');
 const fileRemove = document.getElementById('fileRemove');
-
 const imageGenBtn = document.getElementById('imageGenBtn');
 const imageModal = document.getElementById('imageModal');
 const closeImageModal = document.getElementById('closeImageModal');
@@ -39,13 +36,13 @@ let uploadedFile = null;
 let fileContent = null;
 let uploadedFileIsImage = false;
 let uploadedImageData = null;
+let uploadedImageUrl = null;
 
 let conversationId = null;
 let conversations = [];
 let isStreaming = false;
 
 userEmail.textContent = user.email || 'User';
-
 loadConversations();
 
 messageInput.addEventListener('input', () => {
@@ -57,13 +54,12 @@ messageInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendMessage(); }
 });
 
-// ─── File Upload ───────────────────────────────────────────────────────────
+// ─── File Upload ──────────────────────────────────────────────────────────────
 fileBtn.addEventListener('click', () => fileInput.click());
 
 fileInput.addEventListener('change', async (e) => {
   const file = e.target.files[0];
   if (!file) return;
-
   if (file.size > 20 * 1024 * 1024) { alert('File too large. Maximum size is 20MB.'); return; }
 
   uploadedFile = file;
@@ -74,7 +70,7 @@ fileInput.addEventListener('change', async (e) => {
   fileSize.textContent = formatFileSize(file.size);
   filePreview.style.display = 'flex';
 
-  setStatus('Processing file...', true);
+  setStatus(isImage ? 'Analyzing image with vision AI...' : 'Processing file...', true);
 
   try {
     const formData = new FormData();
@@ -93,6 +89,7 @@ fileInput.addEventListener('change', async (e) => {
       fileContent = data.content;
       uploadedFileIsImage = data.isImage;
       uploadedImageData = data.imageData;
+      uploadedImageUrl = data.imageUrl;
       setStatus(`✓ File ready: ${file.name}`);
     }
   } catch (err) {
@@ -108,6 +105,7 @@ function removeFile() {
   fileContent = null;
   uploadedFileIsImage = false;
   uploadedImageData = null;
+  uploadedImageUrl = null;
   fileInput.value = '';
   filePreview.style.display = 'none';
   setStatus('Ready');
@@ -130,6 +128,7 @@ function setStatus(text, loading = false) {
 }
 
 function appendMessage(role, text = '', withCursor = false) {
+  const emptyState = document.getElementById('emptyState');
   if (emptyState) emptyState.remove();
 
   const wrap = document.createElement('div');
@@ -153,15 +152,32 @@ function appendMessage(role, text = '', withCursor = false) {
   wrap.appendChild(bubble);
   chatArea.appendChild(wrap);
   setTimeout(() => chatArea.scrollTo({ top: chatArea.scrollHeight, behavior: 'smooth' }), 0);
-
   return bubble;
+}
+
+// Render a stored message - handles image markdown and plain text
+function renderStoredMessage(role, content) {
+  const bubble = appendMessage(role, '');
+  // Check for image markdown ![image](url)
+  const imgMatch = content.match(/!\[image\]\(([^)]+)\)/);
+  if (imgMatch) {
+    const imgUrl = imgMatch[1];
+    const textWithoutImg = content.replace(/!\[image\]\([^)]+\)/, '').trim();
+    bubble.innerHTML = `
+      <img src="${imgUrl}" style="max-width:200px;border-radius:8px;margin-bottom:6px;display:block;" 
+        onerror="this.style.display='none'" />
+      ${textWithoutImg}
+    `;
+  } else {
+    bubble.textContent = content;
+  }
 }
 
 async function sendMessage() {
   const text = messageInput.value.trim();
   if (!text || isStreaming) return;
 
-  // ─── Detect image generation from prompt ────────────────────────────────
+  // Detect image generation from prompt
   const imageMatch = text.match(/(?:generate|create|make|draw)\s+(?:an?\s+)?image\s+(?:of|with)?\s*(.+)/i);
   if (imageMatch && !uploadedFile) {
     const prompt = imageMatch[1];
@@ -180,7 +196,7 @@ async function sendMessage() {
       const src = `data:image/jpeg;base64,${data.image_data}`;
       aiBubble.innerHTML = `Here's your generated image:<br>
         <img src="${src}" style="max-width:100%;border-radius:8px;margin-top:8px;" alt="Generated" /><br>
-        <button onclick="(()=>{const a=document.createElement('a');a.href='${src}';a.download='orion-image.jpg';a.click()})()" 
+        <button onclick="(()=>{const a=document.createElement('a');a.href='${src}';a.download='orion-image.jpg';a.click()})()"
           style="margin-top:8px;padding:6px 14px;background:transparent;border:1px solid #555;border-radius:6px;color:inherit;cursor:pointer;">
           ⬇ Download
         </button>`;
@@ -191,17 +207,20 @@ async function sendMessage() {
     }
     return;
   }
-  // ────────────────────────────────────────────────────────────────────────
 
   isStreaming = true;
   sendBtn.disabled = true;
   messageInput.value = '';
   messageInput.style.height = 'auto';
 
-  // Show uploaded image in chat if it's an image
-  if (uploadedFileIsImage && uploadedImageData) {
+  // Show uploaded image preview in chat using local file
+  if (uploadedFileIsImage && uploadedFile) {
     const userBubble = appendMessage('user', '');
-    userBubble.innerHTML = `<img src="data:image/jpeg;base64,${uploadedImageData}" style="max-width:200px;border-radius:8px;margin-bottom:6px;display:block;" />${text}`;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      userBubble.innerHTML = `<img src="${e.target.result}" style="max-width:200px;border-radius:8px;margin-bottom:6px;display:block;" />${text}`;
+    };
+    reader.readAsDataURL(uploadedFile);
   } else {
     appendMessage('user', uploadedFile ? `📎 ${uploadedFile.name}\n${text}` : text);
   }
@@ -220,7 +239,8 @@ async function sendMessage() {
         conversationId,
         fileContent,
         fileName: uploadedFile?.name,
-        isImage: uploadedFileIsImage
+        isImage: uploadedFileIsImage,
+        imageUrl: uploadedImageUrl
       }),
     });
 
@@ -259,7 +279,7 @@ async function sendMessage() {
             removeFile();
           } else if (data.type === 'error') {
             cursor.remove();
-            aiBubble.textContent = '⚠️ Error';
+            aiBubble.textContent = '⚠️ Error: ' + data.message;
             setStatus('Error');
           }
         } catch (_) {}
@@ -317,7 +337,10 @@ async function switchConversation(id) {
     const res = await fetch(`/api/conversations/${id}`, { headers: { 'Authorization': `Bearer ${token}` } });
     const data = await res.json();
     chatTitle.textContent = data.title;
-    data.messages.forEach(msg => appendMessage(msg.role === 'assistant' ? 'ai' : msg.role, msg.content));
+    data.messages.forEach(msg => {
+      const role = msg.role === 'assistant' ? 'ai' : msg.role;
+      renderStoredMessage(role, msg.content);
+    });
     renderConversationsList();
   } catch (err) { console.error(err); }
 }
@@ -351,7 +374,7 @@ function logout() {
   window.location.href = '/';
 }
 
-// ─── Image Generation Modal ──────────────────────────────────────────────────
+// ─── Image Generation Modal ───────────────────────────────────────────────────
 imageGenBtn.addEventListener('click', () => {
   imageModal.style.display = 'flex';
   imagePromptInput.focus();
@@ -390,7 +413,6 @@ generateImageBtn.addEventListener('click', async () => {
       link.click();
     };
 
-    // Also post to chat
     appendMessage('user', `🖼 Generate image: ${prompt}`);
     const aiBubble = appendMessage('ai', '');
     aiBubble.innerHTML = `<img src="${src}" style="max-width:100%;border-radius:8px;margin-top:8px;" alt="Generated" /><br>
