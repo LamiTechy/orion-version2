@@ -113,6 +113,56 @@ newChatBtn.addEventListener('click', createNewConversation);
 clearBtn.addEventListener('click', clearCurrentConversation);
 logoutBtn.addEventListener('click', logout);
 
+// ─── Voice Input ──────────────────────────────────────────────────────────────
+const micBtn = document.getElementById('micBtn');
+let recognition = null;
+let isListening = false;
+
+if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+  const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  recognition = new SpeechRecognition();
+  recognition.continuous = false;
+  recognition.interimResults = true;
+  recognition.lang = 'en-US';
+
+  recognition.onstart = () => {
+    isListening = true;
+    micBtn.classList.add('listening');
+    setStatus('🎤 Listening...', true);
+  };
+
+  recognition.onresult = (e) => {
+    const transcript = Array.from(e.results).map(r => r[0].transcript).join('');
+    messageInput.value = transcript;
+    messageInput.style.height = 'auto';
+    messageInput.style.height = Math.min(messageInput.scrollHeight, 180) + 'px';
+  };
+
+  recognition.onend = () => {
+    isListening = false;
+    micBtn.classList.remove('listening');
+    setStatus('Ready');
+    // Auto send if something was transcribed
+    if (messageInput.value.trim()) sendMessage();
+  };
+
+  recognition.onerror = (e) => {
+    isListening = false;
+    micBtn.classList.remove('listening');
+    setStatus(e.error === 'not-allowed' ? '⚠ Microphone access denied' : 'Ready');
+  };
+
+  micBtn.addEventListener('click', () => {
+    if (isListening) {
+      recognition.stop();
+    } else {
+      recognition.start();
+    }
+  });
+} else {
+  micBtn.style.display = 'none'; // Hide if browser doesn't support
+}
+
 function setStatus(text, loading = false) {
   statusText.textContent = text;
   statusDot.className = 'status-dot' + (loading ? ' loading' : '');
