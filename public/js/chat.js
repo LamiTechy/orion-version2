@@ -147,12 +147,18 @@ function renderStoredMessage(role, content) {
   if (imgMatch) {
     const imgUrl = imgMatch[1];
     const textWithoutImg = content.replace(/!\[image\]\([^)]+\)/, '').trim();
-    bubble.innerHTML = `<img src="${imgUrl}" style="max-width:100%;border-radius:8px;margin-bottom:6px;display:block;" onerror="this.style.display='none'" /><br>${textWithoutImg}`;
+    bubble.innerHTML = `
+      <img src="${imgUrl}" style="max-width:500px;width:100%;border-radius:8px;margin-bottom:8px;display:block;" onerror="this.style.display='none'" />
+      <button onclick="(()=>{const a=document.createElement('a');a.href='${imgUrl}';a.download='orion-image.jpg';a.click()})()"
+        style="margin-top:4px;padding:6px 14px;background:transparent;border:1px solid #555;border-radius:6px;color:inherit;cursor:pointer;font-size:0.82rem;">
+        ⬇ Download
+      </button>
+      ${textWithoutImg ? `<br><small style="opacity:0.6">${textWithoutImg}</small>` : ''}
+    `;
   } else {
     bubble.textContent = content;
   }
 }
-
 async function saveImageMessages(userMsg, assistantMsg) {
   try {
     const res = await fetch('/api/chat/save-image-messages', {
@@ -177,9 +183,25 @@ async function sendMessage() {
   if (!text || isStreaming) return;
 
   // ─── Image generation from prompt ────────────────────────────────────────
-  const imageMatch = text.match(/(?:generate|create|make|draw)\s+(?:an?\s+)?image\s+(?:of|with)?\s*(.+)/i);
-  if (imageMatch && !uploadedFile) {
-    const prompt = imageMatch[1];
+// Ask AI to classify intent
+let isImageRequest = false;
+let imagePromptText = text;
+
+if (!uploadedFile) {
+  try {
+    const intentRes = await fetch('/api/chat/classify-intent', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ message: text })
+    });
+    const intentData = await intentRes.json();
+    isImageRequest = intentData.isImage;
+    imagePromptText = intentData.prompt || text;
+  } catch {}
+}
+
+if (isImageRequest) {
+  const prompt = imagePromptText;
     messageInput.value = '';
     appendMessage('user', text);
     setStatus('Generating image...', true);
@@ -195,7 +217,7 @@ async function sendMessage() {
       const src = `data:image/jpeg;base64,${data.image_data}`;
       const imageUrl = data.image_url || src;
       aiBubble.innerHTML = `Here's your generated image:<br>
-        <img src="${imageUrl}" style="max-width:100%;border-radius:8px;margin-top:8px;" alt="Generated" onerror="this.src='${src}'" /><br>
+        <img src="${imageUrl}" style="max-width:500px;width:100%;border-radius:8px;margin-top:8px;" alt="Generated" onerror="this.src='${src}'" /><br>
         <button onclick="(()=>{const a=document.createElement('a');a.href='${src}';a.download='orion-image.jpg';a.click()})()"
           style="margin-top:8px;padding:6px 14px;background:transparent;border:1px solid #555;border-radius:6px;color:inherit;cursor:pointer;">⬇ Download</button>`;
       await saveImageMessages(text, `Generated image for: "${prompt}"\n![image](${imageUrl})`);
@@ -401,7 +423,7 @@ generateImageBtn.addEventListener('click', async () => {
     };
     appendMessage('user', `🖼 Generate image: ${prompt}`);
     const aiBubble = appendMessage('ai', '');
-    aiBubble.innerHTML = `<img src="${imageUrl}" style="max-width:100%;border-radius:8px;margin-top:8px;" alt="Generated" onerror="this.src='${src}'" /><br>
+    aiBubble.innerHTML = `<img src="${imageUrl}" style="max-width:500px;width:100%;border-radius:8px;margin-top:8px;" alt="Generated" onerror="this.src='${src}'" /><br>
       <small style="opacity:0.6">Prompt: ${prompt}</small>`;
     await saveImageMessages(`🖼 Generate image: ${prompt}`, `Generated image for: "${prompt}"\n![image](${imageUrl})`);
   } catch (err) {

@@ -448,7 +448,37 @@ app.delete('/api/conversations/:id', authenticateToken, async (req, res) => {
     res.json({ success: true });
   } catch { res.status(500).json({ error: 'Failed to delete.' }); }
 });
+// Classify user intent - detect image generation requests
+app.post('/api/chat/classify-intent', authenticateToken, async (req, res) => {
+  const { message } = req.body;
+  try {
+    const response = await groq.chat.completions.create({
+      model: MODEL,
+      max_tokens: 60,
+      messages: [{
+        role: 'user',
+        content: `Analyze this message and determine if the user wants to generate/create an image or wants a text response.
 
+Message: "${message}"
+
+Reply with JSON only, no explanation:
+- If they want an image: {"isImage": true, "prompt": "<description to use for image generation>"}
+- If they want text: {"isImage": false, "prompt": null}
+
+Examples that ARE image requests: "show me a cat", "paint a sunset", "visualize a forest", "picture of a dog", "can you draw mountains", "I want to see a futuristic city"
+Examples that are NOT image requests: "what is a cat", "describe a sunset", "tell me about forests"`
+      }]
+    });
+
+    const raw = response.choices[0].message.content.trim();
+    const json = JSON.parse(raw.replace(/```json|```/g, '').trim());
+    res.json(json);
+  } catch (err) {
+    // Fallback to keyword matching if AI fails
+    const keywordMatch = message.match(/(?:generate|create|make|draw|show|paint|visualize|picture|photo|image)\s+.+/i);
+    res.json({ isImage: !!keywordMatch, prompt: message });
+  }
+});
 // Serve Frontend
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));
 
