@@ -139,14 +139,46 @@ async function extractFileContent(buffer, mimetype, filename) {
   }
 
   // Images
-  if (mimetype.startsWith('image/')) {
-    return {
-      text: `[Image: ${filename}]`,
-      type: 'image',
-      imageData: buffer.toString('base64'),
-      imageExt: ext
-    };
+  // if (mimetype.startsWith('image/')) {
+  //   return {
+  //     text: `[Image: ${filename}]`,
+  //     type: 'image',
+  //     imageData: buffer.toString('base64'),
+  //     imageExt: ext
+  //   };
+  // }
+
+  // Images - use Groq vision to describe the image
+if (mimetype.startsWith('image/')) {
+  const base64 = buffer.toString('base64');
+  let description = '';
+  try {
+    const visionResponse = await groq.chat.completions.create({
+      model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+      messages: [
+        {
+          role: 'user',
+          content: [
+            { type: 'image_url', image_url: { url: `data:${mimetype};base64,${base64}` } },
+            { type: 'text', text: 'Describe this image in detail. Include all visible text, objects, people, colors, layout, and any other relevant information.' }
+          ]
+        }
+      ],
+      max_tokens: 1024
+    });
+    description = visionResponse.choices[0].message.content;
+    console.log('Image described by vision model');
+  } catch (err) {
+    console.error('Vision error:', err.message);
+    description = `[Image file: ${filename}]`;
   }
+  return {
+    text: `[Image: ${filename}]\n\nImage description:\n${description}`,
+    type: 'image',
+    imageData: base64,
+    imageExt: ext
+  };
+}
 
   // Text-readable files: code, config, markup, data files
   const textTypes = [
@@ -318,7 +350,7 @@ app.post('/api/chat/stream', authenticateToken, async (req, res) => {
     if (fileContent && !isImage) {
       messageContent = `The user uploaded a file named "${fileName}".\n\nFull file content:\n${fileContent}\n\n---\n\nUser question: ${message}`;
     } else if (isImage) {
-      messageContent = `The user uploaded an image named "${fileName}". Answer their question: ${message}`;
+      messageContent = `The user uploaded an image named "${fileName}".\n\n${fileContent}\n\n---\n\nUser question: ${message}`
     }
 
     let searchContext = '';
