@@ -67,6 +67,25 @@ function generateTitle(msg) {
   return msg.length > 40 ? msg.slice(0, 40) + '...' : msg;
 }
 
+async function generateAITitle(message) {
+  try {
+    const response = await groq.chat.completions.create({
+      model: MODEL,
+      max_tokens: 20,
+      messages: [
+        {
+          role: 'user',
+          content: `Generate a short 3-6 word title for a conversation that starts with this message. Only return the title, nothing else, no quotes, capitalize the first letter of each word:\n\n"${message.slice(0, 200)}"`
+        }
+      ]
+    });
+    const title = response.choices[0].message.content.trim().replace(/^["']|["']$/g, '');
+    return title || generateTitle(message);
+  } catch {
+    return generateTitle(message);
+  }
+}
+
 // Web Search
 async function searchWeb(query) {
   try {
@@ -326,7 +345,8 @@ app.post('/api/chat/stream', authenticateToken, async (req, res) => {
         return res.status(403).json({ error: 'Access denied.' });
       }
     } else {
-      conversation = await Conversation.create({ userId: req.userId, title: generateTitle(message) });
+      const title = await generateAITitle(message);
+      conversation = await Conversation.create({ userId: req.userId, title });
     }
 
     let userMessageForDB = message;
