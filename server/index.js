@@ -103,11 +103,19 @@ async function extractFileContent(buffer, mimetype, filename) {
 
   if (mimetype === 'application/pdf' || ext === 'pdf') {
     try {
-      const pdfParse = (await import('pdf-parse/lib/pdf-parse.js')).default;
+      // Use pdf-parse lib directly to avoid test file crash on Render
+      const { default: pdfParse } = await import('pdf-parse/lib/pdf-parse.js');
       const data = await pdfParse(buffer);
-      return { text: data.text, type: 'document' };
+      const text = data.text || '';
+      console.log(`PDF parsed: ${data.numpages} pages, ${text.length} chars`);
+      return { text: text.trim() || '[PDF has no extractable text]', type: 'document' };
     } catch (err) {
-      throw new Error('Failed to parse PDF: ' + err.message);
+      console.error('PDF parse error:', err.message);
+      // Fallback: return error message instead of crashing
+      return { 
+        text: `[PDF: ${filename}]\nCould not extract text from this PDF. It may be scanned or image-based. Please describe what you need help with.`, 
+        type: 'document' 
+      };
     }
   }
 
@@ -136,7 +144,9 @@ async function extractFileContent(buffer, mimetype, filename) {
     }
   }
 
-  if (ext === 'csv') return { text: buffer.toString('utf-8'), type: 'document' };
+  if (ext === 'csv') {
+    return { text: buffer.toString('utf-8'), type: 'document' };
+  }
 
   if (mimetype.startsWith('image/')) {
     const base64 = buffer.toString('base64');
@@ -146,6 +156,7 @@ async function extractFileContent(buffer, mimetype, filename) {
     const uniqueName = `${Date.now()}-${filename.replace(/[^a-zA-Z0-9.]/g, '_')}`;
     fs.writeFileSync(path.join(uploadsDir, uniqueName), buffer);
     const imageUrl = `/uploads/${uniqueName}`;
+
     let description = '';
     try {
       const visionResponse = await groq.chat.completions.create({
@@ -160,34 +171,54 @@ async function extractFileContent(buffer, mimetype, filename) {
         max_tokens: 1024
       });
       description = visionResponse.choices[0].message.content;
+      console.log('Image described by vision model');
     } catch (err) {
       console.error('Vision error:', err.message);
       description = `[Image file: ${filename}]`;
     }
-    return { text: `[Image: ${filename}]\n\nImage description:\n${description}`, type: 'image', imageUrl, imageData: base64, imageExt: ext };
+
+    return {
+      text: `[Image: ${filename}]\n\nImage description:\n${description}`,
+      type: 'image',
+      imageUrl,
+      imageData: base64,
+      imageExt: ext
+    };
   }
 
   const textTypes = ['js','ts','jsx','tsx','py','java','c','cpp','cs','go','rs','php','rb',
     'swift','kt','md','txt','html','css','sql','sh','json','xml','yaml','yml','env','toml',
-    'ini','log','vue','svelte','r','dart','lua','perl','scala'];
-  if (mimetype.startsWith('text/') || mimetype === 'application/json' || mimetype === 'application/xml' || textTypes.includes(ext)) {
-    try { return { text: buffer.toString('utf-8'), type: 'document' }; }
-    catch { return { text: `[File: ${filename}] Could not read as text.`, type: 'document' }; }
+    'ini','log','vue','svelte','r','dart','lua','perl','scala','clj','ex','erl','hs','elm'];
+
+  if (mimetype.startsWith('text/') || mimetype === 'application/json' ||
+    mimetype === 'application/xml' || textTypes.includes(ext)) {
+    try {
+      return { text: buffer.toString('utf-8'), type: 'document' };
+    } catch {
+      return { text: `[File: ${filename}] Could not read as text.`, type: 'document' };
+    }
   }
 
-  return { text: `[File: ${filename} | Type: ${mimetype} | Size: ${(buffer.length/1024).toFixed(1)}KB]`, type: 'document' };
+  return {
+    text: `[File: ${filename} | Type: ${mimetype} | Size: ${(buffer.length / 1024).toFixed(1)}KB]\nThis file type cannot be read as text.`,
+    type: 'document'
+  };
 }
 
-// Upload Route
 app.post('/api/upload', authenticateToken, upload.single('file'), async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
     const file = req.file;
     const extracted = await extractFileContent(file.buffer, file.mimetype, file.originalname);
     res.json({
-      success: true, filename: file.originalname, fileType: file.mimetype, fileSize: file.size,
-      isImage: extracted.type === 'image', imageUrl: extracted.imageUrl || null,
-      imageData: extracted.imageData || null, imageExt: extracted.imageExt || null,
+      success: true,
+      filename: file.originalname,
+      fileType: file.mimetype,
+      fileSize: file.size,
+      isImage: extracted.type === 'image',
+      imageUrl: extracted.imageUrl || null,
+      imageData: extracted.imageData || null,
+      imageExt: extracted.imageExt || null,
       content: extracted.text.substring(0, 50000)
     });
   } catch (err) {
@@ -198,7 +229,6 @@ app.post('/api/upload', authenticateToken, upload.single('file'), async (req, re
 
 app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
 
-// Image Generation - saves to disk
 app.post('/api/generate-image', authenticateToken, async (req, res) => {
   const { prompt } = req.body;
   if (!prompt) return res.status(400).json({ error: 'No prompt provided' });
@@ -224,20 +254,8 @@ app.post('/api/generate-image', authenticateToken, async (req, res) => {
       if (response.ok) {
         const ct = response.headers.get('content-type') || '';
         if (ct.startsWith('image/')) {
-          const arrayBuf = await response.arrayBuffer();
-          const buffer = Buffer.from(arrayBuf);
-          const base64 = buffer.toString('base64');
-
-          // Save to disk for permanent URL
-          const fs = (await import('fs')).default;
-          const uploadsDir = path.join(__dirname, '..', 'public', 'uploads');
-          if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
-          const filename = `generated-${Date.now()}.jpg`;
-          fs.writeFileSync(path.join(uploadsDir, filename), buffer);
-          const imageUrl = `/uploads/${filename}`;
-
-          console.log('Image saved to:', imageUrl);
-          return res.json({ success: true, image_data: base64, image_url: imageUrl });
+          const base64 = Buffer.from(await response.arrayBuffer()).toString('base64');
+          return res.json({ success: true, image_data: base64 });
         }
       }
       if (response.status !== 503) {
@@ -252,29 +270,6 @@ app.post('/api/generate-image', authenticateToken, async (req, res) => {
   res.status(500).json({ error: 'Image generation failed. Please try again.' });
 });
 
-// Save image generation messages (creates conversation if needed)
-app.post('/api/chat/save-image-messages', authenticateToken, async (req, res) => {
-  const { conversationId, userMessage, assistantMessage } = req.body;
-  try {
-    let conversation;
-    if (conversationId) {
-      conversation = await Conversation.findById(conversationId);
-      if (conversation && conversation.userId.toString() !== req.userId) conversation = null;
-    }
-    if (!conversation) {
-      const title = await generateAITitle(userMessage);
-      conversation = await Conversation.create({ userId: req.userId, title });
-    }
-    await Message.create({ conversationId: conversation._id, role: 'user', content: userMessage });
-    await Message.create({ conversationId: conversation._id, role: 'assistant', content: assistantMessage });
-    res.json({ success: true, conversationId: conversation._id.toString(), title: conversation.title });
-  } catch (err) {
-    console.error('Save image messages error:', err);
-    res.status(500).json({ error: err.message });
-  }
-});
-
-// Auth Routes
 app.post('/api/auth/signup', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) return res.status(400).json({ error: 'Email and password required.' });
@@ -310,27 +305,11 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
     const user = await User.findById(req.userId);
     if (!user) return res.status(404).json({ error: 'User not found.' });
     res.json({ userId: user._id.toString(), email: user.email });
-  } catch { res.status(500).json({ error: 'Failed to get user.' }); }
-});
-
-app.post('/api/auth/change-password', authenticateToken, async (req, res) => {
-  const { currentPassword, newPassword } = req.body;
-  if (!currentPassword || !newPassword) return res.status(400).json({ error: 'All fields required.' });
-  if (newPassword.length < 6) return res.status(400).json({ error: 'New password must be at least 6 characters.' });
-  try {
-    const user = await User.findById(req.userId);
-    if (!user) return res.status(404).json({ error: 'User not found.' });
-    const valid = await bcrypt.compare(currentPassword, user.password);
-    if (!valid) return res.status(401).json({ error: 'Current password is incorrect.' });
-    user.password = await bcrypt.hash(newPassword, 10);
-    await user.save();
-    res.json({ success: true, message: 'Password updated successfully.' });
-  } catch (err) {
-    res.status(500).json({ error: 'Failed to update password.' });
+  } catch {
+    res.status(500).json({ error: 'Failed to get user.' });
   }
 });
 
-// Chat Stream
 app.post('/api/chat/stream', authenticateToken, async (req, res) => {
   const { message, conversationId, fileContent, fileName, isImage, imageUrl } = req.body;
   if (!message || typeof message !== 'string') return res.status(400).json({ error: 'Message is required.' });
@@ -371,7 +350,54 @@ app.post('/api/chat/stream', authenticateToken, async (req, res) => {
     if (fileContent && !isImage) {
       messageContent = `The user uploaded a file named "${fileName}".\n\nFull file content:\n${fileContent}\n\n---\n\nUser question: ${message}`;
     } else if (isImage && fileContent) {
-      messageContent = `The user uploaded an image named "${fileName}".\n\nHere is what the image contains (analyzed by a vision model):\n${fileContent}\n\n---\n\nUser question: ${message}`;
+      // Do vision analysis here at chat time instead of upload time
+      let imageDescription = fileContent;
+      if (fileContent.startsWith('[IMAGE_BASE64:')) {
+        try {
+          const parts = fileContent.slice(14).split(':');
+          const imgMime = parts[0];
+          const imgBase64 = parts.slice(1).join(':');
+          console.log('Running vision analysis at chat time...');
+          const visionPromise = groq.chat.completions.create({
+            model: 'meta-llama/llama-4-scout-17b-16e-instruct',
+            messages: [{
+              role: 'user',
+              content: [
+                { type: 'image_url', image_url: { url: `data:${imgMime};base64,${imgBase64}` } },
+                { type: 'text', text: 'Describe this image in detail. Include all visible text, objects, people, colors, layout, and any other relevant information.' }
+              ]
+            }],
+            max_tokens: 512
+          });
+          const timeout = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 25000));
+          const visionResponse = await Promise.race([visionPromise, timeout]);
+          imageDescription = visionResponse.choices[0].message.content;
+          console.log('Vision analysis complete');
+
+          // Also save image to disk now that we have time
+          try {
+            const fs = (await import('fs')).default;
+            const uploadsDir = path.join(__dirname, '..', 'public', 'uploads');
+            if (!fs.existsSync(uploadsDir)) fs.mkdirSync(uploadsDir, { recursive: true });
+            const uniqueName = `${Date.now()}-${(fileName || 'image').replace(/[^a-zA-Z0-9.]/g, '_')}`;
+            fs.writeFileSync(path.join(uploadsDir, uniqueName), Buffer.from(imgBase64, 'base64'));
+            const savedUrl = `/uploads/${uniqueName}`;
+            // Update the user message in DB with the image URL
+            await Message.findOneAndUpdate(
+              { conversationId: conversation._id, role: 'user' },
+              { $set: { content: userMessageForDB.replace('[IMAGE_BASE64:', `![image](${savedUrl})
+[IMAGE_BASE64:`) } },
+              { sort: { createdAt: -1 } }
+            );
+          } catch(saveErr) {
+            console.error('Could not save image to disk:', saveErr.message);
+          }
+        } catch (err) {
+          console.error('Vision error at chat time:', err.message);
+          imageDescription = 'The user uploaded an image. Vision analysis unavailable.';
+        }
+      }
+      messageContent = `The user uploaded an image named "${fileName}".\n\nHere is what the image contains (analyzed by a vision model):\n${imageDescription}\n\n---\n\nUser question: ${message}`;
     }
 
     let searchContext = '';
@@ -381,17 +407,24 @@ app.post('/api/chat/stream', authenticateToken, async (req, res) => {
       if (sr.results?.length > 0) {
         searchContext = `\n\n[Web search results for: "${message}"]\n`;
         if (sr.answer) searchContext += `Summary: ${sr.answer}\n\n`;
-        sr.results.forEach((r, i) => { searchContext += `${i+1}. ${r.title}\n   ${r.content}\n   Source: ${r.url}\n`; });
+        sr.results.forEach((r, i) => {
+          searchContext += `${i + 1}. ${r.title}\n   ${r.content}\n   Source: ${r.url}\n`;
+        });
       }
     }
 
     const messagesForAI = [
-      { role: 'system', content: (process.env.SYSTEM_PROMPT || 'You are Orion, a helpful AI assistant. When a user uploads a file or image, carefully read and analyze the full content provided and answer questions about it accurately.') + searchContext },
+      {
+        role: 'system',
+        content: (process.env.SYSTEM_PROMPT || 'You are Orion, a helpful AI assistant. When a user uploads a file or image, carefully read and analyze the full content provided and answer questions about it accurately.') + searchContext
+      },
       ...history.slice(-6),
       { role: 'user', content: messageContent }
     ];
 
-    const stream = await groq.chat.completions.create({ model: MODEL, max_tokens: 2048, stream: true, messages: messagesForAI });
+    const stream = await groq.chat.completions.create({
+      model: MODEL, max_tokens: 2048, stream: true, messages: messagesForAI
+    });
 
     let fullResponse = '';
     for await (const chunk of stream) {
@@ -413,7 +446,6 @@ app.post('/api/chat/stream', authenticateToken, async (req, res) => {
   }
 });
 
-// Conversation Routes
 app.get('/api/conversations', authenticateToken, async (req, res) => {
   try {
     const convs = await Conversation.find({ userId: req.userId }).sort({ createdAt: -1 });
@@ -448,44 +480,19 @@ app.delete('/api/conversations/:id', authenticateToken, async (req, res) => {
     res.json({ success: true });
   } catch { res.status(500).json({ error: 'Failed to delete.' }); }
 });
-// Classify user intent - detect image generation requests
-app.post('/api/chat/classify-intent', authenticateToken, async (req, res) => {
-  const { message } = req.body;
-  try {
-    const response = await groq.chat.completions.create({
-      model: MODEL,
-      max_tokens: 60,
-      messages: [{
-        role: 'user',
-        content: `Analyze this message and determine if the user wants to generate/create an image or wants a text response.
 
-Message: "${message}"
-
-Reply with JSON only, no explanation:
-- If they want an image: {"isImage": true, "prompt": "<description to use for image generation>"}
-- If they want text: {"isImage": false, "prompt": null}
-
-Examples that ARE image requests: "show me a cat", "paint a sunset", "visualize a forest", "picture of a dog", "can you draw mountains", "I want to see a futuristic city"
-Examples that are NOT image requests: "what is a cat", "describe a sunset", "tell me about forests"`
-      }]
-    });
-
-    const raw = response.choices[0].message.content.trim();
-    const json = JSON.parse(raw.replace(/```json|```/g, '').trim());
-    res.json(json);
-  } catch (err) {
-    // Fallback to keyword matching if AI fails
-    const keywordMatch = message.match(/(?:generate|create|make|draw|show|paint|visualize|picture|photo|image)\s+.+/i);
-    res.json({ isImage: !!keywordMatch, prompt: message });
-  }
-});
-// Serve Frontend
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));
+
+// Global error handler - prevents unhandled errors from crashing requests
+app.use((err, req, res, next) => {
+  console.error('Unhandled error:', err.message);
+  res.status(500).json({ error: 'Server error: ' + err.message });
+});
 
 app.listen(PORT, () => {
   console.log(`\n🚀 Orion AI running at http://localhost:${PORT}`);
   console.log(`🤖 Model: ${MODEL}`);
   console.log(`📁 File support: PDF, DOCX, XLSX, CSV, images, all code files`);
   console.log(`👁  Vision: Llama 4 Scout`);
-  console.log(`🖼  Image gen: Hugging Face FLUX + saved to disk\n`);
+  console.log(`🖼  Image gen: Hugging Face FLUX\n`);
 });
