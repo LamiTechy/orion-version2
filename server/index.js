@@ -15,6 +15,7 @@ import multer from 'multer';
 import User from '../models/User.js';
 import Conversation from '../models/Conversation.js';
 import Message from '../models/Message.js';
+import Memory from '../models/memory.js';
 
 dns.setDefaultResultOrder('ipv4first');
 
@@ -76,6 +77,47 @@ async function generateAITitle(message) {
     return title || generateTitle(message);
   } catch {
     return generateTitle(message);
+  }
+}
+async function getUserMemory(userId) {
+  try {
+    const memory = await Memory.findOne({ userId });
+    if (!memory || memory.facts.length === 0) return '';
+    return '\n\n[What you remember about this user]\n' + memory.facts.map(f => `- ${f}`).join('\n');
+  } catch { return ''; }
+}
+
+async function extractAndSaveMemory(userId, conversation) {
+  try {
+    if (conversation.length < 2) return;
+    const recentMessages = conversation.slice(-6).map(m => `${m.role}: ${m.content.substring(0, 200)}`).join('\n');
+    const response = await groq.chat.completions.create({
+      model: MODEL,
+      max_tokens: 150,
+      messages: [{
+        role: 'user',
+        content: `Extract any personal facts about the USER ONLY from this conversation. Things like their name, job, location, hobbies, preferences, goals. Return a JSON array of short fact strings, max 5 facts. If nothing new, return [].
+
+Conversation:
+${recentMessages}
+
+Reply with JSON array only e.g: ["Name is John", "Works as a nurse", "Lives in Lagos"]`
+      }]
+    });
+    const raw = response.choices[0].message.content.trim().replace(/\`\`\`json|\`\`\`/g, '').trim();
+    const newFacts = JSON.parse(raw);
+    if (!Array.isArray(newFacts) || newFacts.length === 0) return;
+    const existing = await Memory.findOne({ userId });
+    const existingFacts = existing ? existing.facts : [];
+    const merged = [...new Set([...existingFacts, ...newFacts])].slice(0, 20);
+    await Memory.findOneAndUpdate(
+      { userId },
+      { facts: merged, updatedAt: new Date() },
+      { upsert: true, new: true }
+    );
+    console.log(`Memory updated: ${newFacts.length} new facts`);
+  } catch (err) {
+    console.error('Memory extraction error:', err.message);
   }
 }
 
@@ -384,12 +426,16 @@ app.post('/api/chat/stream', authenticateToken, async (req, res) => {
         sr.results.forEach((r, i) => { searchContext += `${i+1}. ${r.title}\n   ${r.content}\n   Source: ${r.url}\n`; });
       }
     }
+    const userMemory = await getUserMemory(req.userId);
 
-    const messagesForAI = [
-      { role: 'system', content: (process.env.SYSTEM_PROMPT || 'You are Orion, a helpful AI assistant. When a user uploads a file or image, carefully read and analyze the full content provided and answer questions about it accurately.') + searchContext },
-      ...history.slice(-6),
-      { role: 'user', content: messageContent }
-    ];
+const messagesForAI = [
+  {
+    role: 'system',
+    content: (process.env.SYSTEM_PROMPT || 'You are Orion, a helpful AI assistant. Always respond in the same language the user writes in. If the user writes in Yoruba, respond in Yoruba. If they write in Igbo, respond in Igbo. If they write in Hausa, respond in Hausa. If they write in Pidgin, respond in Pidgin. If they write in French, respond in French, and so on for any language. When a user uploads a file or image, carefully read and analyze the full content provided and answer questions about it accurately. Use what you remember about the user to personalize your responses naturally.') + userMemory + searchContext
+  },
+  ...history.slice(-6),
+  { role: 'user', content: messageContent }
+];
 
     const stream = await groq.chat.completions.create({ model: MODEL, max_tokens: 2048, stream: true, messages: messagesForAI });
 
@@ -403,8 +449,12 @@ app.post('/api/chat/stream', authenticateToken, async (req, res) => {
     }
 
     await Message.create({ conversationId: conversation._id, role: 'assistant', content: fullResponse });
-    res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
-    res.end();
+
+const allMessages = await Message.find({ conversationId: conversation._id }).sort({ createdAt: -1 }).limit(6);
+extractAndSaveMemory(req.userId, allMessages.reverse().map(m => ({ role: m.role, content: m.content }))).catch(() => {});
+
+res.write(`data: ${JSON.stringify({ type: 'done' })}\n\n`);
+res.end();
 
   } catch (err) {
     console.error('Stream error:', err);
@@ -479,6 +529,16 @@ Examples that are NOT image requests: "what is a cat", "describe a sunset", "tel
     res.json({ isImage: !!keywordMatch, prompt: message });
   }
 });
+
+app.delete('/api/memory', authenticateToken, async (req, res) => {
+  try {
+    await Memory.findOneAndDelete({ userId: req.userId });
+    res.json({ success: true, message: 'Memory cleared.' });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // Serve Frontend
 app.get('*', (req, res) => res.sendFile(path.join(__dirname, '../public/index.html')));
 

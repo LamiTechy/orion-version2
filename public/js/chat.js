@@ -41,10 +41,15 @@ let conversationId = null;
 let conversations = [];
 let isStreaming = false;
 
+function renderMarkdown(text) {
+  if (typeof marked === 'undefined') return text;
+  try { return marked.parse(text); } catch { return text; }
+}
+
 userEmail.textContent = user.email || 'User';
 
 loadConversations().then(() => {
-  const lastConvId = localStorage.getItem('lastConversationId');
+  const lastConvId = sessionStorage.getItem('lastConversationId');
   if (lastConvId) switchConversation(lastConvId);
 });
 
@@ -177,8 +182,13 @@ function appendMessage(role, text = '', withCursor = false) {
   avatar.className = `avatar ${role}`;
   avatar.textContent = role === 'ai' ? 'OR' : 'ME';
   const bubble = document.createElement('div');
-  bubble.className = 'bubble';
+bubble.className = 'bubble';
+if (role === 'ai' && text && !withCursor) {
+  bubble.innerHTML = renderMarkdown(text);
+  if (typeof hljs !== 'undefined') bubble.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
+} else {
   bubble.textContent = text;
+}
   if (withCursor) {
     const cursor = document.createElement('span');
     cursor.className = 'cursor';
@@ -190,6 +200,7 @@ function appendMessage(role, text = '', withCursor = false) {
   setTimeout(() => chatArea.scrollTo({ top: chatArea.scrollHeight, behavior: 'smooth' }), 0);
   return bubble;
 }
+
 
 function renderStoredMessage(role, content) {
   const bubble = appendMessage(role, '');
@@ -205,9 +216,12 @@ function renderStoredMessage(role, content) {
       </button>
       ${textWithoutImg ? `<br><small style="opacity:0.6">${textWithoutImg}</small>` : ''}
     `;
-  } else {
-    bubble.textContent = content;
-  }
+    } else if (role === 'ai') {
+      bubble.innerHTML = renderMarkdown(content);
+      if (typeof hljs !== 'undefined') bubble.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
+    } else {
+      bubble.textContent = content;
+    }
 }
 async function saveImageMessages(userMsg, assistantMsg) {
   try {
@@ -219,7 +233,7 @@ async function saveImageMessages(userMsg, assistantMsg) {
     const data = await res.json();
     if (data.conversationId) {
       conversationId = data.conversationId;
-      localStorage.setItem('lastConversationId', conversationId);
+      sessionStorage.setItem('lastConversationId', conversationId);
       if (data.title) chatTitle.textContent = data.title;
       loadConversations();
     }
@@ -325,7 +339,7 @@ if (isImageRequest) {
           const data = JSON.parse(line.slice(5).trim());
           if (data.type === 'start') {
             conversationId = data.conversationId;
-            localStorage.setItem('lastConversationId', conversationId);
+            sessionStorage.setItem('lastConversationId', conversationId);
             if (data.title) chatTitle.textContent = data.title;
             loadConversations();
           } else if (data.type === 'searching') {
@@ -395,7 +409,7 @@ function renderConversationsList() {
 
 async function switchConversation(id) {
   conversationId = id;
-  localStorage.setItem('lastConversationId', id);
+  sessionStorage.setItem('lastConversationId', id);
   chatArea.innerHTML = '';
   try {
     const res = await fetch(`/api/conversations/${id}`, { headers: { 'Authorization': `Bearer ${token}` } });
@@ -411,7 +425,7 @@ async function switchConversation(id) {
 
 function createNewConversation() {
   conversationId = null;
-  localStorage.removeItem('lastConversationId');
+  sessionStorage.removeItem('lastConversationId');
   chatArea.innerHTML = '<div class="empty-state" id="emptyState"><h2>Hey, I\'m Orion</h2><p>Your AI assistant</p></div>';
   chatTitle.textContent = 'New Chat';
   removeFile();
@@ -436,7 +450,7 @@ async function deleteConversation(id) {
 function logout() {
   localStorage.removeItem('token');
   localStorage.removeItem('user');
-  localStorage.removeItem('lastConversationId');
+  sessionStorage.removeItem('lastConversationId');
   window.location.href = '/';
 }
 
