@@ -31,7 +31,8 @@ mongoose.connect(process.env.MONGODB_URI)
   .catch(err => { console.error('❌ MongoDB error:', err); process.exit(1); });
 
 const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
-const MODEL = 'llama-3.3-70b-versatile';
+// const MODEL = 'llama-3.3-70b-versatile';
+const MODEL = 'meta-llama/llama-4-scout-17b-16e-instruct';
 
 app.use(cors());
 app.use(express.json({ limit: '25mb' }));
@@ -431,7 +432,7 @@ app.post('/api/chat/stream', authenticateToken, async (req, res) => {
 const messagesForAI = [
   {
     role: 'system',
-    content: (process.env.SYSTEM_PROMPT || 'You are Orion, a helpful AI assistant. Always respond in the same language the user writes in. If the user writes in Yoruba, respond in Yoruba. If they write in Igbo, respond in Igbo. If they write in Hausa, respond in Hausa. If they write in Pidgin, respond in Pidgin. If they write in French, respond in French, and so on for any language. When a user uploads a file or image, carefully read and analyze the full content provided and answer questions about it accurately. Use what you remember about the user to personalize your responses naturally.') + userMemory + searchContext
+    content: (process.env.SYSTEM_PROMPT || 'You are Orion, a helpful AI assistant. You are multilingual and fluent in ALL languages including Yoruba, Igbo, Hausa, Nigerian Pidgin, French, Arabic, Spanish and more. This is very important: ALWAYS detect the language the user is writing in and respond ONLY in that same language. NEVER ask the user to translate or write in English. If someone writes "Kini aṣa" that is Yoruba and you MUST respond in Yoruba. If someone writes in Pidgin respond in Pidgin. Match the user language automatically without asking. When a user uploads a file or image, carefully read and analyze the full content and answer accurately. Use what you remember about the user to personalize your responses naturally.') + userMemory + searchContext
   },
   ...history.slice(-6),
   { role: 'user', content: messageContent }
