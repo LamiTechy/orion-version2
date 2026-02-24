@@ -228,9 +228,21 @@ function renderStoredMessage(role, content) {
       ${textWithoutImg ? `<br><small style="opacity:0.6">${textWithoutImg}</small>` : ''}
     `;
     } else if (role === 'ai') {
-      bubble.innerHTML = renderMarkdown(content);
-      if (typeof hljs !== 'undefined') bubble.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
-    } else {
+  bubble.innerHTML = renderMarkdown(content);
+  if (typeof hljs !== 'undefined') bubble.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
+  bubble.querySelectorAll('pre').forEach(pre => {
+    const btn = document.createElement('button');
+    btn.textContent = 'Copy';
+    btn.style.cssText = 'position:absolute;top:8px;right:8px;padding:3px 10px;background:#2a2e4d;border:1px solid #444;border-radius:4px;color:#ccc;font-size:0.75rem;cursor:pointer;';
+    btn.onclick = () => {
+      navigator.clipboard.writeText(pre.querySelector('code')?.innerText || pre.innerText);
+      btn.textContent = '✓ Copied!';
+      setTimeout(() => btn.textContent = 'Copy', 2000);
+    };
+    pre.style.position = 'relative';
+    pre.appendChild(btn);
+  });
+} else {
       bubble.textContent = content;
     }
 }
@@ -364,13 +376,22 @@ if (isImageRequest) {
   cursor.remove();
   aiBubble.innerHTML = renderMarkdown(accumulatedText);
   if (typeof hljs !== 'undefined') aiBubble.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
+  // Add copy button to every code block
+  aiBubble.querySelectorAll('pre').forEach(pre => {
+    const btn = document.createElement('button');
+    btn.textContent = 'Copy';
+    btn.style.cssText = 'position:absolute;top:8px;right:8px;padding:3px 10px;background:#2a2e4d;border:1px solid #444;border-radius:4px;color:#ccc;font-size:0.75rem;cursor:pointer;';
+    btn.onclick = () => {
+      navigator.clipboard.writeText(pre.querySelector('code')?.innerText || pre.innerText);
+      btn.textContent = '✓ Copied!';
+      setTimeout(() => btn.textContent = 'Copy', 2000);
+    };
+    pre.style.position = 'relative';
+    pre.appendChild(btn);
+  });
   setStatus('Ready');
   loadConversations();
   removeFile();
-} else if (data.type === 'error') {
-  cursor.remove();
-  aiBubble.textContent = '⚠️ Error: ' + data.message;
-  setStatus('Error');
 }
         } catch (_) {}
       }

@@ -347,3 +347,15 @@ textarea:focus { border-color: var(--accent); outline: none; }
   font-weight: 600;
   color: #818cf8;
 }
+
+.bubble pre {
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.bubble pre code {
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
