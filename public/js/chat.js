@@ -42,15 +42,26 @@ let conversations = [];
 let isStreaming = false;
 
 function renderMarkdown(text) {
-  if (typeof marked === 'undefined') return text;
+  if (typeof marked === 'undefined') return `<span class="md-pending">${text}</span>`;
   try { return marked.parse(text); } catch { return text; }
 }
 
 userEmail.textContent = user.email || 'User';
 
-loadConversations().then(() => {
-  const lastConvId = sessionStorage.getItem('lastConversationId');
-  if (lastConvId) switchConversation(lastConvId);
+function waitForMarked(callback) {
+  if (typeof marked !== 'undefined') {
+    callback();
+  } else {
+    setTimeout(() => waitForMarked(callback), 50);
+  }
+}
+
+waitForMarked(() => {
+  marked.setOptions({ breaks: true, gfm: true });
+  loadConversations().then(() => {
+    const lastConvId = sessionStorage.getItem('lastConversationId');
+    if (lastConvId) switchConversation(lastConvId);
+  });
 });
 
 messageInput.addEventListener('input', () => {
@@ -345,20 +356,22 @@ if (isImageRequest) {
           } else if (data.type === 'searching') {
             setStatus(`🔍 Searching: ${data.query}`, true);
           } else if (data.type === 'delta') {
-            accumulatedText += data.text;
-            aiBubble.textContent = accumulatedText;
-            aiBubble.appendChild(cursor);
-            chatArea.scrollTo({ top: chatArea.scrollHeight, behavior: 'smooth' });
-          } else if (data.type === 'done') {
-            cursor.remove();
-            setStatus('Ready');
-            loadConversations();
-            removeFile();
-          } else if (data.type === 'error') {
-            cursor.remove();
-            aiBubble.textContent = '⚠️ Error: ' + data.message;
-            setStatus('Error');
-          }
+  accumulatedText += data.text;
+  aiBubble.textContent = accumulatedText;
+  aiBubble.appendChild(cursor);
+  chatArea.scrollTo({ top: chatArea.scrollHeight, behavior: 'smooth' });
+} else if (data.type === 'done') {
+  cursor.remove();
+  aiBubble.innerHTML = renderMarkdown(accumulatedText);
+  if (typeof hljs !== 'undefined') aiBubble.querySelectorAll('pre code').forEach(el => hljs.highlightElement(el));
+  setStatus('Ready');
+  loadConversations();
+  removeFile();
+} else if (data.type === 'error') {
+  cursor.remove();
+  aiBubble.textContent = '⚠️ Error: ' + data.message;
+  setStatus('Error');
+}
         } catch (_) {}
       }
     }
